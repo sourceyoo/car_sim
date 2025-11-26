@@ -71,9 +71,10 @@ install(
   PROGRAMS
   scripts/teleop_keyboard.py
   scripts/odom_tf_broadcaster.py
-  scripts/path_recorder.py
-  scripts/csv_path_player.py
-  scripts/pure_pursuit.py
+  route_finding/path_recorder.py
+  route_finding/csv_path_player.py
+  purepursuit/pure_pursuit.py
+  trajectory_viewer/trajectory.py
   DESTINATION lib/${PROJECT_NAME})
 
 ament_package()
