@@ -59,7 +59,7 @@ void JarbayPlugin::Load(physics::ModelPtr model, sdf::ElementPtr sdf) {
 
     footprint_link = model->GetLink("base_footprint");
 
-    update_connection = event::Events::ConnectWorldUpdateBegin(boost::bind(&JarbayPlugin::onUpdate, this, _1));
+    update_connection = event::Events::ConnectWorldUpdateBegin(boost::bind(&JarbayPlugin::onUpdate, this, boost::placeholders::_1));
 
     // ROS initialization
     ros_node = gazebo_ros::Node::Get(sdf);

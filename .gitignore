@@ -1,0 +1,61 @@
+# ROS2 / Colcon build artifacts
+build/
+install/
+log/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# C++ build cache
+*.o
+*.so
+*.a
+*.lo
+*.lai
+*.la
+*.mod.c
+*.rej
+*.orig
+
+# Gazebo Classic cache & models
+.gazebo/
+*.world~
+*.sdf~
+*.urdf~
+*.dae~
+*.stl~
+
+# VSCode / CLion / JetBrains
+.vscode/
+.idea/
+*.code-workspace
+
+# ROS2 launch / param backups
+*.launch.py~
+*.yaml~
+*.rviz~
+
+# MacOS / Windows
+.DS_Store
+Thumbs.db
+
+# cmake & colcon metadata
+CMakeCache.txt
+CMakeFiles/
+CTestTestfile.cmake
+cmake_install.cmake
+Makefile
+
+# Submodules build artifacts
+**/velodyne_simulator/**/build/
+**/velodyne_simulator/**/install/
+**/velodyne_simulator/**/log/
+
+# Temporary files
+*~
+*.tmp
+*.swp
+*.swo
