@@ -5,6 +5,8 @@ from launch.actions import DeclareLaunchArgument
 from launch.substitutions import LaunchConfiguration, Command
 from launch_ros.substitutions import FindPackageShare
 from launch_ros.actions import Node
+from launch_ros.parameter_descriptions import ParameterValue
+
 
 def generate_launch_description():
     pkg_share = FindPackageShare(package='car_sim_description').find('car_sim_description')
@@ -28,7 +30,14 @@ def generate_launch_description():
                 'use_sim_time': True,
                 'frame_prefix': [LaunchConfiguration('robot_name'), '/'],
                 'publish_frequency': LaunchConfiguration('tf_freq'),
-                'robot_description': Command([f'xacro {urdf_file} pub_tf:=', LaunchConfiguration('pub_tf'), ' blue:=', LaunchConfiguration('blue'), ' robot_name:=', LaunchConfiguration('robot_name')])
+                'robot_description': ParameterValue(
+                    Command([
+                        f'xacro {urdf_file} pub_tf:=', LaunchConfiguration('pub_tf'),
+                        ' blue:=', LaunchConfiguration('blue'),
+                        ' robot_name:=', LaunchConfiguration('robot_name')
+                    ]),
+                    value_type=str
+                )
             }]),
         Node(
             package='gazebo_ros',

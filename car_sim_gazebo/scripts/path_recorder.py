@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 import rclpy
 from rclpy.node import Node
+from rclpy.parameter import Parameter
+from rclpy.exceptions import ParameterAlreadyDeclaredException
 
 from nav_msgs.msg import Path
 from geometry_msgs.msg import PoseStamped
@@ -19,18 +21,28 @@ class PathRecorder(Node):
         # ===== 파라미터 설정 =====
         # 전역 기준 프레임 (RViz Fixed Frame과 맞추기)
         self.declare_parameter('global_frame', 'map')
-        # 로봇 기준 프레임 (차량 베이스 링크)
-        self.declare_parameter('base_frame', 'base_link')
+        # 로봇 기준 프레임 (TF 트리의 최하위, 여기서는 base_footprint가 직계)
+        self.declare_parameter('base_frame', 'base_footprint')
         # CSV 저장 경로
         default_csv = '/home/yoo/Final_P/car_sim_path.csv'
         self.declare_parameter('csv_path', default_csv)
         # 기록 주파수(Hz)
         self.declare_parameter('record_hz', 10.0)
+        # 시뮬레이션 시간 사용 여부
+        try:
+            self.declare_parameter('use_sim_time', False)
+        except ParameterAlreadyDeclaredException:
+            pass
 
         self.global_frame = self.get_parameter('global_frame').value
         self.base_frame = self.get_parameter('base_frame').value
         self.csv_path = self.get_parameter('csv_path').value
         record_hz = self.get_parameter('record_hz').value
+        use_sim_time = self.get_parameter('use_sim_time').get_parameter_value().bool_value
+
+        # 시뮬레이션 시간 설정을 노드 파라미터로 반영
+        if use_sim_time:
+            self.set_parameters([Parameter(name='use_sim_time', value=True)])
 
         self.get_logger().info(
             f"[PathRecorder] global_frame={self.global_frame}, "
@@ -134,4 +146,3 @@ def main(args=None):
 
 if __name__ == '__main__':
     main()
-

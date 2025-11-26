@@ -37,15 +37,37 @@ def generate_launch_description():
         launch_arguments=car_sim_options.items()
     )
 
-    # rviz = Node(
-    #     package='rviz2',
-    #     executable='rviz2',
-    #     name='single_vehicle_viz',
-    #     arguments=['-d', os.path.join(get_package_share_directory('car_sim_gazebo'), 'rviz', 'single_vehicle_example.rviz')]
-    # )
+    odom_tf_broadcaster = Node(
+        package='car_sim_gazebo',
+        executable='odom_tf_broadcaster.py',
+        name='odom_tf_broadcaster',
+        output='screen',
+        parameters=[{
+            'use_sim_time': True,
+            'odom_topic': 'odom',
+            'frame_id': 'odom',
+            'child_frame_id': 'base_footprint'
+        }]
+    )
+
+    map_to_odom_tf = Node(
+        package='tf2_ros',
+        executable='static_transform_publisher',
+        name='map_to_world_broadcaster',
+        arguments=['0', '0', '0', '0', '0', '0', 'map', 'odom']
+    )
+
+    rviz = Node(
+         package='rviz2',
+         executable='rviz2',
+         name='single_vehicle_viz',
+         arguments=['-d', os.path.join(get_package_share_directory('car_sim_gazebo'), 'rviz', 'single_vehicle_example.rviz')]
+    )
 
     return LaunchDescription([
         gazebo_simulator,
         spawn_car,
-        # rviz
+        odom_tf_broadcaster,
+        map_to_odom_tf,
+        rviz
     ])

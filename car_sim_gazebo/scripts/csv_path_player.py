@@ -8,6 +8,7 @@ from geometry_msgs.msg import PoseStamped, Quaternion
 import csv
 import os
 import math
+from rclpy.exceptions import ParameterAlreadyDeclaredException
 
 
 class CsvPathPlayer(Node):
@@ -18,9 +19,17 @@ class CsvPathPlayer(Node):
         default_csv = '/home/yoo/Final_P/car_sim_path.csv'
         self.declare_parameter('csv_path', default_csv)
         self.declare_parameter('frame_id', 'map')
+        try:
+            self.declare_parameter('use_sim_time', False)
+        except ParameterAlreadyDeclaredException:
+            pass
 
         self.csv_path = self.get_parameter('csv_path').value
         self.frame_id = self.get_parameter('frame_id').value
+        use_sim_time = self.get_parameter('use_sim_time').get_parameter_value().bool_value
+
+        if use_sim_time:
+            self.set_parameters([rclpy.parameter.Parameter(name='use_sim_time', value=True)])
 
         self.get_logger().info(f"[CsvPathPlayer] CSV: {self.csv_path}")
         self.get_logger().info(f"[CsvPathPlayer] frame_id: {self.frame_id}")

@@ -70,6 +70,9 @@ install(
 install(
   PROGRAMS
   scripts/teleop_keyboard.py
+  scripts/odom_tf_broadcaster.py
+  scripts/path_recorder.py
+  scripts/csv_path_player.py
   DESTINATION lib/${PROJECT_NAME})
 
 ament_package()

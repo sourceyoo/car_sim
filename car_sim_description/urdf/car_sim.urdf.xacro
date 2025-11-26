@@ -46,6 +46,18 @@
           <namespace>$(arg robot_name)</namespace>
         </ros>
     </plugin>
+    <!-- Ground-truth odom/TF: world -> base_footprint -->
+    <plugin name="ground_truth_tf" filename="libgazebo_ros_p3d.so">
+      <ros>
+        <namespace>$(arg robot_name)</namespace>
+      </ros>
+      <body_name>base_footprint</body_name>
+      <frame_name>world</frame_name>          <!-- 참조 프레임: 월드 -->
+      <topic_name>ground_truth/odom</topic_name>
+      <update_rate>50.0</update_rate>
+      <gaussian_noise>0.0</gaussian_noise>
+      <publish_tf>true</publish_tf>           <!-- world -> base_footprint TF 브로드캐스트 -->
+    </plugin>
   </gazebo>
 
   <xacro:macro name="rear_wheel" params="name x y z flip" >

@@ -1,51 +1,52 @@
 #!/usr/bin/env python3
+
 import rclpy
-from rclpy.node import Node
+from geometry_msgs.msg import TransformStamped, Vector3
 from nav_msgs.msg import Odometry
-from geometry_msgs.msg import TransformStamped
-from tf2_ros import TransformBroadcaster, StaticTransformBroadcaster
-from math import pi
+from rclpy.node import Node
+from tf2_ros import TransformBroadcaster
 
-class OdomTF(Node):
-    def __init__(self):
-        super().__init__('odom_tf_broadcaster')
 
-        # static map->odom (필요 시 xyz/rpy 변경)
-        self.static_br = StaticTransformBroadcaster(self)
-        static_tf = TransformStamped()
-        static_tf.header.stamp = self.get_clock().now().to_msg()
-        static_tf.header.frame_id = 'map'
-        static_tf.child_frame_id = 'odom'
-        static_tf.transform.translation.x = 0.0
-        static_tf.transform.translation.y = 0.0
-        static_tf.transform.translation.z = 0.0
-        # rpy->quat(0,0,0)
-        static_tf.transform.rotation.w = 1.0
-        static_tf.transform.rotation.x = 0.0
-        static_tf.transform.rotation.y = 0.0
-        static_tf.transform.rotation.z = 0.0
-        self.static_br.sendTransform(static_tf)
+class OdomTFBroadcaster(Node):
+    """Subscribe to nav_msgs/Odometry and re-broadcast it as TF."""
 
-        # odom->base_link 브로드캐스터
-        self.br = TransformBroadcaster(self)
-        self.create_subscription(Odometry, '/odom', self.cb_odom, 10)
-        self.get_logger().info('odom_tf_broadcaster started: static map->odom + odom->base_link')
+    def __init__(self) -> None:
+        super().__init__("odom_tf_broadcaster")
+        # Parameters allow overriding topic and frame IDs.
+        self.declare_parameter("odom_topic", "ground_truth/odom")
+        self.declare_parameter("frame_id", "odom")
+        self.declare_parameter("child_frame_id", "base_footprint")
 
-    def cb_odom(self, msg: Odometry):
+        odom_topic = self.get_parameter("odom_topic").get_parameter_value().string_value
+        self.frame_id = self.get_parameter("frame_id").get_parameter_value().string_value
+        self.child_frame_id = self.get_parameter("child_frame_id").get_parameter_value().string_value
+
+        self.tf_broadcaster = TransformBroadcaster(self)
+        self.odom_sub = self.create_subscription(Odometry, odom_topic, self._on_odom, 10)
+
+    def _on_odom(self, msg: Odometry) -> None:
         t = TransformStamped()
         t.header.stamp = msg.header.stamp
-        t.header.frame_id = msg.header.frame_id or 'odom'
-        t.child_frame_id = msg.child_frame_id or 'base_link'
-        t.transform.translation.x = msg.pose.pose.position.x
-        t.transform.translation.y = msg.pose.pose.position.y
-        t.transform.translation.z = msg.pose.pose.position.z
+        # Force configured frame IDs so the TF tree is consistent even if the
+        # incoming message uses a different frame.
+        t.header.frame_id = self.frame_id
+        t.child_frame_id = self.child_frame_id
+        # Copy into a Vector3 to satisfy TF message type requirements.
+        pos = msg.pose.pose.position
+        t.transform.translation = Vector3(x=pos.x, y=pos.y, z=pos.z)
         t.transform.rotation = msg.pose.pose.orientation
-        self.br.sendTransform(t)
+        self.tf_broadcaster.sendTransform(t)
 
-def main():
-    rclpy.init()
-    rclpy.spin(OdomTF())
-    rclpy.shutdown()
 
-if __name__ == '__main__':
+def main(args=None) -> None:
+    rclpy.init(args=args)
+    node = OdomTFBroadcaster()
+    try:
+        rclpy.spin(node)
+    finally:
+        node.destroy_node()
+        rclpy.shutdown()
+
+
+if __name__ == "__main__":
     main()
