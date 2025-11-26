@@ -8,7 +8,7 @@ from rclpy.parameter import Parameter
 from geometry_msgs.msg import PoseStamped, Point, Quaternion
 from nav_msgs.msg import Path, Odometry
 from ackermann_msgs.msg import AckermannDriveStamped
-from visualization_msgs.msg import Marker
+from visualization_msgs.msg import Marker, MarkerArray
 from tf2_ros import Buffer, TransformListener
 import tf2_geometry_msgs.tf2_geometry_msgs as tf2_geometry
 
@@ -27,10 +27,10 @@ class PurePursuitNode(Node):
         self.declare_parameter("base_frame", "base_footprint")
         self.declare_parameter("global_frame", "map")
         self.declare_parameter("wheel_base", 2.65)
-        self.declare_parameter("lookahead_ratio", 2.0)
-        self.declare_parameter("min_lookahead", 2.0)
-        self.declare_parameter("max_lookahead", 10.0)
-        self.declare_parameter("target_speed", 3.0)
+        self.declare_parameter("lookahead_ratio", 3.0)
+        self.declare_parameter("min_lookahead", 5.0)
+        self.declare_parameter("max_lookahead", 15.0)
+        self.declare_parameter("target_speed", 7.0)
         self.declare_parameter("control_rate", 20.0)
         try:
             self.declare_parameter("use_sim_time", True)
@@ -63,7 +63,10 @@ class PurePursuitNode(Node):
             durability=DurabilityPolicy.TRANSIENT_LOCAL,
             reliability=ReliabilityPolicy.RELIABLE,
         )
-        self.pub_marker = self.create_publisher(Marker, "~/debug_marker", qos_markers)
+        # use explicit absolute topic to avoid empty/relative resolution issues
+        self.pub_markers = self.create_publisher(
+            MarkerArray, "/pure_pursuit/debug_markers", qos_markers
+        )
 
         self.tf_buffer = Buffer(cache_time=Duration(seconds=10.0))
         self.tf_listener = TransformListener(self.tf_buffer, self)
@@ -96,10 +99,19 @@ class PurePursuitNode(Node):
         # transform pose to global_frame if needed
         if pose.header.frame_id != self.global_frame:
             try:
-                pose.header.stamp = rclpy.time.Time().to_msg()
-                pose = self.tf_buffer.transform(
-                    pose, self.global_frame, timeout=Duration(seconds=0.1)
-                )
+                if self.tf_buffer.can_transform(
+                    self.global_frame,
+                    pose.header.frame_id,
+                    rclpy.time.Time(),
+                    timeout=Duration(seconds=0.1),
+                ):
+                    pose.header.stamp = rclpy.time.Time().to_msg()
+                    pose = self.tf_buffer.transform(
+                        pose, self.global_frame, timeout=Duration(seconds=0.1)
+                    )
+                else:
+                    # frame 자체가 TF에 없으면 좌표는 그대로 두고 frame만 global_frame으로 맞춤
+                    pose.header.frame_id = self.global_frame
             except Exception as e:
                 # fallback: assume pose already in global_frame coordinates
                 self.get_logger().warn(
@@ -175,6 +187,8 @@ class PurePursuitNode(Node):
         target_frame = self.global_frame
         pose_vis = pose
 
+        markers = MarkerArray()
+
         # target point sphere
         m_target = Marker()
         m_target.header.frame_id = target_frame
@@ -189,7 +203,7 @@ class PurePursuitNode(Node):
         m_target.color.g = 1.0
         m_target.color.b = 0.0
         m_target.color.a = 1.0
-        self.pub_marker.publish(m_target)
+        markers.markers.append(m_target)
 
         # trajectory arc (LINE_STRIP)
         m_arc = Marker()
@@ -229,10 +243,14 @@ class PurePursuitNode(Node):
         except Exception as e:
             self.get_logger().warn(f"arc gen failed: {e}", throttle_duration_sec=2.0)
 
-        self.pub_marker.publish(m_arc)
+        markers.markers.append(m_arc)
+        self.pub_markers.publish(markers)
         # One-time info to help RViz users
         if not hasattr(self, "_marker_info_logged"):
-            self.get_logger().info("Publishing debug markers on topic 'pure_pursuit/debug_marker' (ns: pure_pursuit)", once=True)
+            self.get_logger().info(
+                "Publishing debug markers on topic '/pure_pursuit/debug_markers' (MarkerArray, ns: pure_pursuit)",
+                once=True,
+            )
             self._marker_info_logged = True
 
     @staticmethod
