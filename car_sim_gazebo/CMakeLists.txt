@@ -73,6 +73,7 @@ install(
   scripts/odom_tf_broadcaster.py
   scripts/path_recorder.py
   scripts/csv_path_player.py
+  scripts/pure_pursuit.py
   DESTINATION lib/${PROJECT_NAME})
 
 ament_package()

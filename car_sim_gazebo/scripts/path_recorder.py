@@ -40,6 +40,13 @@ class PathRecorder(Node):
         record_hz = self.get_parameter('record_hz').value
         use_sim_time = self.get_parameter('use_sim_time').get_parameter_value().bool_value
 
+        # 강제로 map 프레임 사용
+        if self.global_frame != 'map':
+            self.get_logger().warn(
+                f"[PathRecorder] global_frame='{self.global_frame}' overridden to 'map'"
+            )
+            self.global_frame = 'map'
+
         # 시뮬레이션 시간 설정을 노드 파라미터로 반영
         if use_sim_time:
             self.set_parameters([Parameter(name='use_sim_time', value=True)])
