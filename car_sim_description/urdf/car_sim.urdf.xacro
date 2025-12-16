@@ -190,22 +190,22 @@
   </gazebo>
 
   <gazebo reference="wheel_fl" >
-    <mu1>1.75</mu1>
-    <mu2>1.75</mu2>
+    <mu1>0.9</mu1>
+    <mu2>0.9</mu2>
   </gazebo>
 
   <gazebo reference="wheel_fr" >
-    <mu1>1.75</mu1>
-    <mu2>1.75</mu2>
+    <mu1>0.9</mu1>
+    <mu2>0.9</mu2>
   </gazebo>
 
   <gazebo reference="wheel_rl" >
-    <mu1>1.75</mu1>
-    <mu2>1.75</mu2>
+    <mu1>0.9</mu1>
+    <mu2>0.9</mu2>
   </gazebo>
 
   <gazebo reference="wheel_rr" >
-    <mu1>1.75</mu1>
-    <mu2>1.75</mu2>
+    <mu1>0.9</mu1>
+    <mu2>0.9</mu2>
   </gazebo>
 </robot>

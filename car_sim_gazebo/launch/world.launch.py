@@ -61,7 +61,7 @@ def generate_launch_description():
          package='rviz2',
          executable='rviz2',
          name='single_vehicle_viz',
-         arguments=['-d', os.path.join(get_package_share_directory('car_sim_gazebo'), 'rviz', 'single_vehicle_example.rviz')]
+         arguments=['-d', '/home/yoo/Final_P/mpc.rviz']
     )
 
     return LaunchDescription([

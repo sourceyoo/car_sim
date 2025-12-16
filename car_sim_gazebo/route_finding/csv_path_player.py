@@ -16,7 +16,7 @@ class CsvPathPlayer(Node):
         super().__init__('csv_path_player')
 
         # ===== 파라미터 =====
-        default_csv = '/home/yoo/Final_P/car_sim_path.csv'
+        default_csv = '/home/yoo/Final_P/car_sim_path_resampled.csv'
         self.declare_parameter('csv_path', default_csv)
         self.declare_parameter('frame_id', 'map')
         try:

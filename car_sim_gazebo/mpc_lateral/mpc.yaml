@@ -1,0 +1,31 @@
+mpc_lateral:
+  ros__parameters:
+    # frames/topics
+    path_frame: map
+    command_topic: /itusct/command_cmd
+    path_topic: csv_path
+    odom_topic: odom
+    target_speed: 2.98         # [rad/s] default forward speed command
+    # vehicle
+    wheelbase: 2.65          # [m]
+    steer_limit: 0.52       # [rad]
+    # MPC weights
+    Qy: 916.6              # lateral error weight
+    Qpsi: 52.931               # heading error weight
+    Rdelta: 0.74271           # steering increment weight
+    # horizons / sampling
+    Np: 30                  # prediction horizon
+    Nc: 10                   # control horizon
+    Ts: 0.05                 # sampling time [s]
+    # constraints
+    Dmax_deg: 15.0           # per-step steering increment limit [deg]
+    deviation_distance_thresh: 2.0       # [m] warn if distance to path exceeds
+    deviation_heading_thresh_rad: 0.5    # [rad] warn if heading error exceeds
+    # curvature feed-forward / smoothing
+    curvature_lookahead_dist: 1.0        # [m] distance window for curvature smoothing
+    ff_gain: 0.5                          # scaling for feed-forward steering
+    # steering estimation from odom yaw-rate
+    use_odom_steer_est: false
+    steer_est_v_thresh: 0.5               # [m/s] min speed to trust yaw-rate
+    steer_est_lpf_alpha: 0.2              # LPF alpha for steer estimate (0~1, higher=slower)
+   

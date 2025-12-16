@@ -9,6 +9,7 @@ from geometry_msgs.msg import PoseStamped, Point, Quaternion
 from nav_msgs.msg import Path, Odometry
 from ackermann_msgs.msg import AckermannDriveStamped
 from visualization_msgs.msg import Marker, MarkerArray
+from std_msgs.msg import Float64
 from tf2_ros import Buffer, TransformListener
 import tf2_geometry_msgs.tf2_geometry_msgs as tf2_geometry
 
@@ -58,6 +59,8 @@ class PurePursuitNode(Node):
         self.sub_path = self.create_subscription(Path, path_topic, self.on_path, qos_path)
         self.sub_odom = self.create_subscription(Odometry, odom_topic, self.on_odom, 10)
         self.pub_cmd = self.create_publisher(AckermannDriveStamped, cmd_topic, 10)
+        self.pub_lat_err = self.create_publisher(Float64, "pure_pursuit/lateral_error", 10)
+        self.pub_head_err = self.create_publisher(Float64, "pure_pursuit/heading_error", 10)
         qos_markers = QoSProfile(
             depth=1,
             durability=DurabilityPolicy.TRANSIENT_LOCAL,
@@ -128,6 +131,17 @@ class PurePursuitNode(Node):
             self.get_logger().warn("No target point found on path", throttle_duration_sec=2.0)
             return
 
+        # compute and publish tracking errors for PlotJuggler/analysis
+        errors = self.compute_errors(pose)
+        if errors is not None:
+            lat_err, head_err = errors
+            lat_msg = Float64()
+            lat_msg.data = lat_err
+            head_msg = Float64()
+            head_msg.data = head_err
+            self.pub_lat_err.publish(lat_msg)
+            self.pub_head_err.publish(head_msg)
+
         # transform target to base frame
         try:
             target.header.frame_id = self.global_frame
@@ -179,6 +193,38 @@ class PurePursuitNode(Node):
             if acc >= lookahead:
                 return self.path_points[j + 1]
         return self.path_points[-1]
+
+    def compute_errors(self, pose: PoseStamped):
+        """Return (lateral_error, heading_error) in the path/global frame."""
+        if len(self.path_points) < 2:
+            return None
+        # find nearest path point
+        px = pose.pose.position.x
+        py = pose.pose.position.y
+        min_idx = 0
+        min_d2 = 1e12
+        for i, p in enumerate(self.path_points):
+            dx = p.pose.position.x - px
+            dy = p.pose.position.y - py
+            d2 = dx * dx + dy * dy
+            if d2 < min_d2:
+                min_d2 = d2
+                min_idx = i
+        # choose a neighbor to build tangent
+        if min_idx < len(self.path_points) - 1:
+            next_idx = min_idx + 1
+        else:
+            next_idx = min_idx - 1
+        p0 = self.path_points[min_idx].pose.position
+        p1 = self.path_points[next_idx].pose.position
+        path_heading = math.atan2(p1.y - p0.y, p1.x - p0.x)
+        yaw = quat_yaw(pose.pose.orientation)
+        # signed lateral error (left positive)
+        dx = px - p0.x
+        dy = py - p0.y
+        lat_err = -math.sin(path_heading) * dx + math.cos(path_heading) * dy
+        head_err = math.atan2(math.sin(yaw - path_heading), math.cos(yaw - path_heading))
+        return lat_err, head_err
 
     def publish_markers(self, target: PoseStamped, pose: PoseStamped, ld: float, curvature: float):
         now = self.get_clock().now().to_msg()
