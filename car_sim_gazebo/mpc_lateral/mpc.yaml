@@ -10,9 +10,9 @@ mpc_lateral:
     wheelbase: 2.65          # [m]
     steer_limit: 0.52       # [rad]
     # MPC weights
-    Qy: 9337.5             # lateral error weight
-    Qpsi: 123.13               # heading error weight
-    Rdelta: 0.30646           # steering increment weight
+    Qy: 410.37             # lateral error weight
+    Qpsi: 10.088               # heading error weight
+    Rdelta: 0.14907           # steering increment weight
     # horizons / sampling
     Np: 30                  # prediction horizon
     Nc: 5                   # control horizon
