@@ -78,6 +78,10 @@ void JarbayPlugin::onDrive(const ackermann_msgs::msg::AckermannDriveStamped::Sha
     target_speed          = drive_msg->drive.speed;
     target_steering_angle = drive_msg->drive.steering_angle;
 
+    // 입력 speed는 m/s 기준, 내부 PID는 바퀴 각속도(rad/s)를 사용하므로 변환
+    const double wheel_radius = 0.36;
+    target_speed = target_speed / wheel_radius;
+
     if (target_speed > MAX_SPEED) {
         target_speed = MAX_SPEED;
     }

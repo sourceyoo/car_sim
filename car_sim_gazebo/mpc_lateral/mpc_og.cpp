@@ -134,27 +134,28 @@ class MPCLateralNode : public rclcpp::Node
 public:
   MPCLateralNode()
   : Node("mpc_lateral"),
-    horizon_(declare_parameter<int>("Np", 30)),
-    control_horizon_(declare_parameter<int>("Nc", 10)),
-    dt_(declare_parameter<double>("Ts", 0.05)),
-    wheelbase_(declare_parameter<double>("wheelbase", 2.65)),
-    steer_limit_(declare_parameter<double>("steer_limit", 0.7)),
-    q_lat_(declare_parameter<double>("Qy", 200.0)),
-    q_head_(declare_parameter<double>("Qpsi", 10.0)),
-    r_steer_(declare_parameter<double>("Rdelta", 100.0)),
-    dmax_deg_(declare_parameter<double>("Dmax_deg", 2.0)),
-    path_frame_(declare_parameter<std::string>("path_frame", "map")),
-    cmd_topic_(declare_parameter<std::string>("command_topic", "/itusct/command_cmd")),
-    path_topic_(declare_parameter<std::string>("path_topic", "csv_path")),
-    odom_topic_(declare_parameter<std::string>("odom_topic", "odom")),
-    target_speed_(declare_parameter<double>("target_speed", 1.0)),
-    dev_dist_thresh_(declare_parameter<double>("deviation_distance_thresh", 2.0)),
-    dev_heading_thresh_(declare_parameter<double>("deviation_heading_thresh_rad", 0.5)),
-    curvature_lookahead_dist_(declare_parameter<double>("curvature_lookahead_dist", 3.0)),
-    ff_gain_(declare_parameter<double>("ff_gain", 0.5)),
-    use_odom_steer_est_(declare_parameter<bool>("use_odom_steer_est", false)),
-    steer_est_v_thresh_(declare_parameter<double>("steer_est_v_thresh", 0.5)),
-    steer_est_lpf_alpha_(declare_parameter<double>("steer_est_lpf_alpha", 0.2))
+    horizon_(declare_parameter<int>("Np")),
+    control_horizon_(declare_parameter<int>("Nc")),
+    dt_(declare_parameter<double>("Ts")),
+    wheelbase_(declare_parameter<double>("wheelbase")),
+    steer_limit_(declare_parameter<double>("steer_limit")),
+    q_lat_(declare_parameter<double>("Qy")),
+    q_head_(declare_parameter<double>("Qpsi")),
+    r_steer_(declare_parameter<double>("Rdelta")),
+    dmax_deg_(declare_parameter<double>("Dmax_deg")),
+    path_frame_(declare_parameter<std::string>("path_frame")),
+    cmd_topic_(declare_parameter<std::string>("command_topic")),
+    path_topic_(declare_parameter<std::string>("path_topic")),
+    odom_topic_(declare_parameter<std::string>("odom_topic")),
+    target_speed_(declare_parameter<double>("target_speed")),
+    dev_dist_thresh_(declare_parameter<double>("deviation_distance_thresh")),
+    dev_heading_thresh_(declare_parameter<double>("deviation_heading_thresh_rad")),
+    // [New Parameters]
+    curvature_lookahead_dist_(declare_parameter<double>("curvature_lookahead_dist")),
+    ff_gain_(declare_parameter<double>("ff_gain")),
+    use_odom_steer_est_(declare_parameter<bool>("use_odom_steer_est")),
+    steer_est_v_thresh_(declare_parameter<double>("steer_est_v_thresh")),
+    steer_est_lpf_alpha_(declare_parameter<double>("steer_est_lpf_alpha"))
   {
     tf_buffer_ = std::make_shared<tf2_ros::Buffer>(this->get_clock());
     tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
@@ -178,14 +179,11 @@ public:
     yaw_rate_pub_ = create_publisher<std_msgs::msg::Float64>("mpc/yaw_rate", 10);
     steering_cmd_pub_ = create_publisher<std_msgs::msg::Float64>("mpc/steering_cmd", 10);
     steering_est_pub_ = create_publisher<std_msgs::msg::Float64>("mpc/steering_est", 10);
-    yaw_rate_pub_ = create_publisher<std_msgs::msg::Float64>("mpc/yaw_rate", 10);
-    steering_cmd_pub_ = create_publisher<std_msgs::msg::Float64>("mpc/steering_cmd", 10);
-    steering_est_pub_ = create_publisher<std_msgs::msg::Float64>("mpc/steering_est", 10);
 
     timer_ = create_wall_timer(
       std::chrono::duration<double>(dt_), std::bind(&MPCLateralNode::onTimer, this));
 
-    RCLCPP_INFO(get_logger(), "Error-State MPC Ready. Wheelbase: %.2f", wheelbase_);
+    RCLCPP_INFO(get_logger(), "MPC (Augmented State: Rate Control) Ready.");
   }
 
 private:
@@ -205,7 +203,6 @@ private:
     odom_ready_ = true;
   }
 
-  // Helper used for FF if needed (optional in error-state, but kept)
   double computeCurvature(const nav_msgs::msg::Path & path, size_t current_idx, double lookahead_dist)
   {
     if (path.poses.size() <= current_idx + 1) return 0.0;
@@ -232,7 +229,6 @@ private:
     return dpsi / accumulated_dist; 
   }
 
-// [MODIFIED] onTimer with Preemptive Steering Logic
   void onTimer()
   {
     const auto t_cb_start = std::chrono::steady_clock::now();
@@ -257,7 +253,6 @@ private:
     if (pose_stamped.header.frame_id == "world" && path_frame_ == "map") {
       pose_stamped.header.frame_id = "map";
     }
-    // TF Transform
     if (pose_stamped.header.frame_id != path_frame_) {
       if (tf_buffer_->canTransform(path_frame_, pose_stamped.header.frame_id, tf2::TimePointZero)) {
         try {
@@ -274,149 +269,194 @@ private:
     }
     const auto & pose = pose_stamped.pose;
     const auto & twist = latest_odom_.twist.twist;
-    const double speed = std::sqrt(twist.linear.x * twist.linear.x + twist.linear.y * twist.linear.y);
 
-    // Find Nearest Point & Calculate Errors
+    const double vx = twist.linear.x;
+    const double vy = twist.linear.y;
+    const double speed = std::sqrt(vx * vx + vy * vy);
+
     const size_t nearest_idx = findNearestIdx(latest_path_, pose);
     const double ref_yaw = yawFromPath(latest_path_, nearest_idx);
     const double heading = yawFromQuat(pose.orientation);
-    
-    // [ERROR STATE CALCULATION]
-    const double e_psi = normalizeAngle(heading - ref_yaw);
-    
+    const double heading_err = normalizeAngle(heading - ref_yaw);
     const double dx = pose.position.x - latest_path_.poses.at(nearest_idx).pose.position.x;
     const double dy = pose.position.y - latest_path_.poses.at(nearest_idx).pose.position.y;
-    const double e_y = -std::sin(ref_yaw) * dx + std::cos(ref_yaw) * dy;
+    const double pos_err = std::hypot(dx, dy);
 
-    // Monitoring
-    std_msgs::msg::Float64 lat_err_msg; lat_err_msg.data = e_y; lateral_error_pub_->publish(lat_err_msg);
-    std_msgs::msg::Float64 head_err_msg; head_err_msg.data = e_psi; heading_error_pub_->publish(head_err_msg);
+    // Monitoring Publishers
+    std_msgs::msg::Float64 lat_err_msg; lat_err_msg.data = pos_err; lateral_error_pub_->publish(lat_err_msg);
+    std_msgs::msg::Float64 head_err_msg; head_err_msg.data = heading_err; heading_error_pub_->publish(head_err_msg);
 
-    // 2. MPC Setup
-    const int nx = 4; // [e_y, e_psi, v, delta]
-    const int nu = 1; // [delta_rate]
+    // 2. MPC Parameters & State Augmentation
+    // [KEY CHANGE] State size is now 5: [x, y, psi, v, delta]
+    const int nx = 5; 
+    const int nu = 1;
     int Np = std::max(1, horizon_);
     int Nc = std::max(1, control_horizon_);
     Nc = std::min(Nc, Np);
     const double Ts = dt_;
+    const double v_lin = std::max(speed, 0.1);
 
-    // [CRITICAL FIX 1] Use Target Speed for Model Linearization & Prediction
-    // This ensures MPC works even when stopped (Preemptive Planning)
-    const double v_model = target_speed_; 
+    // Steering Estimation (Sync logic)
+    double delta_base = delta_prev_;
+    if (use_odom_steer_est_) {
+      const double yaw_rate = twist.angular.z;
+      if (std::abs(speed) > steer_est_v_thresh_) {
+        const double delta_meas = std::atan((wheelbase_ * yaw_rate) / std::max(std::abs(speed), steer_est_v_thresh_));
+        delta_est_ = steer_est_lpf_alpha_ * delta_est_ + (1.0 - steer_est_lpf_alpha_) * delta_meas;
+        delta_est_ = std::clamp(delta_est_, -steer_limit_, steer_limit_);
+        delta_base = delta_est_;
+        delta_prev_ = delta_est_; 
+      }
+    }
 
-    // Sync Steering
-    double delta_curr = delta_prev_; 
+    // Kinematic Model Linearization (Standard 4x4)
+    Eigen::MatrixXd A_kin(4, 4);
+    A_kin << 1.0, 0.0, -v_lin * std::sin(heading) * Ts, std::cos(heading) * Ts,
+             0.0, 1.0,  v_lin * std::cos(heading) * Ts, std::sin(heading) * Ts,
+             0.0, 0.0, 1.0, (1.0 / wheelbase_) * std::tan(delta_base) * Ts, 
+             0.0, 0.0, 0.0, 1.0; 
 
-    // Matrix A (Error Dynamics)
+    // B_kin describes how 'delta' affects state (part of A in augmented model)
+    const double sec_delta_sq = 1.0 / std::max(std::pow(std::cos(delta_base), 2), kEpsilon);
+    Eigen::VectorXd B_kin(4);
+    B_kin << 0.0, 0.0, (v_lin / wheelbase_) * sec_delta_sq * Ts, 0.0;
+
+    // [KEY CHANGE] Augmented Matrix A (5x5)
+    // State: [x, y, psi, v, delta]
+    // delta_{k+1} = delta_k + u_k (integration)
     Eigen::MatrixXd A = Eigen::MatrixXd::Identity(nx, nx);
-    A(0, 1) = v_model * Ts;                  // e_y += v * e_psi * dt
-    A(1, 3) = (v_model / wheelbase_) * Ts;   // e_psi += v/L * delta * dt
+    A.block(0, 0, 4, 4) = A_kin;
+    A.block(0, 4, 4, 1) = B_kin; 
 
-    // Matrix B (Input Integration)
+    // [KEY CHANGE] Augmented Matrix B (5x1)
+    // Input u is 'delta_delta' (steering rate)
     Eigen::MatrixXd B = Eigen::MatrixXd::Zero(nx, nu);
-    B(3, 0) = 1.0; 
+    B(4, 0) = 1.0; 
 
+    Eigen::MatrixXd Ad = A;
+    Eigen::MatrixXd Bd = B;
+
+    // Current State Vector (5D)
     Eigen::VectorXd xk(nx);
-    xk << e_y, e_psi, speed, delta_curr;
+    xk << pose.position.x, pose.position.y, heading, speed, delta_base;
 
-    // 3. Reference Generation with Preemptive Steering (Curvature FF)
+    // 3. Reference Generation
     Eigen::VectorXd ref_stack = Eigen::VectorXd::Zero(Np * nx);
     
-    // Curvature calculation variables
-    double current_path_dist = 0.0;
-    size_t lookahead_idx = nearest_idx;
-    const size_t path_max_idx = latest_path_.poses.size() - 1;
+    // Dist calc
+    const size_t path_size = latest_path_.poses.size();
+    const size_t start_idx = nearest_idx;
+    std::vector<double> cum_dist;
+    cum_dist.reserve(path_size - start_idx);
+    cum_dist.push_back(0.0);
+    for (size_t j = start_idx + 1; j < path_size; ++j) {
+      const auto & p0 = latest_path_.poses.at(j - 1).pose.position;
+      const auto & p1 = latest_path_.poses.at(j).pose.position;
+      const double ds = std::hypot(p1.x - p0.x, p1.y - p0.y);
+      cum_dist.push_back(cum_dist.back() + ds);
+    }
 
     for (int i = 0; i < Np; ++i) {
-      ref_stack(i * nx + 0) = 0.0;           // Target e_y = 0
-      ref_stack(i * nx + 1) = 0.0;           // Target e_psi = 0
-      ref_stack(i * nx + 2) = target_speed_; // Target v
-      
-      // [CRITICAL FIX 2] Calculate Future Curvature & Reference Steering
-      // 1. Calculate predicted distance along path
-      double pred_dist = v_model * Ts * i; 
-
-      // 2. Find path index corresponding to that distance
-      while(lookahead_idx < path_max_idx) {
-          double d = std::hypot(
-              latest_path_.poses[lookahead_idx+1].pose.position.x - latest_path_.poses[lookahead_idx].pose.position.x,
-              latest_path_.poses[lookahead_idx+1].pose.position.y - latest_path_.poses[lookahead_idx].pose.position.y
-          );
-          if (current_path_dist + d > pred_dist) break;
-          current_path_dist += d;
-          lookahead_idx++;
+      const double required_dist = v_lin * Ts * i;
+      size_t rel_idx = 0;
+      while (rel_idx + 1 < cum_dist.size() && cum_dist[rel_idx] < required_dist) {
+        ++rel_idx;
       }
+      const size_t idx = std::min(start_idx + rel_idx, path_size - 1);
+      const auto & ref_pose = latest_path_.poses.at(idx).pose;
       
-      // 3. Compute Curvature (Kappa) at that future point
-      double kappa = computeCurvature(latest_path_, lookahead_idx, curvature_lookahead_dist_);
-      
-      // 4. Set Reference Steering: delta_ref = atan(L * kappa)
-      // This forces the MPC to steer BEFORE the turn starts.
-      ref_stack(i * nx + 3) = std::atan(wheelbase_ * kappa); 
+      ref_stack(i * nx + 0) = ref_pose.position.x;
+      ref_stack(i * nx + 1) = ref_pose.position.y;
+      ref_stack(i * nx + 2) = yawFromPath(latest_path_, idx);
+      ref_stack(i * nx + 3) = target_speed_;
+      ref_stack(i * nx + 4) = 0.0; // Target steering angle is 0 (or FF, but 0 stabilizes)
     }
 
     // 4. QP Matrices
-    Eigen::MatrixXd Q = Eigen::MatrixXd::Zero(nx, nx);
-    Q(0, 0) = q_lat_;    
-    Q(1, 1) = q_head_;   
-    Q(2, 2) = 0.1;       // velocity weight (low)
-    Q(3, 3) = 0.1;       // steer angle weight (low, trust the Ref)
+    const auto [Phi, Gamma] = buildPredictionMatrices(Ad, Bd, Np, Nc);
 
+    // [KEY CHANGE] Weight Matrices for 5 States
+    Eigen::MatrixXd Q = Eigen::MatrixXd::Zero(nx, nx);
+    Q(0, 0) = std::max(q_lat_, 1e-4);
+    Q(1, 1) = std::max(q_lat_, 1e-4);
+    Q(2, 2) = std::max(q_head_, 1e-4);
+    Q(3, 3) = 0.1; // speed error
+    Q(4, 4) = 0.1; // absolute steering minimization (keep small)
+
+    // R is now weight on STEERING RATE (Input u) -> Prevents Oscillation
     Eigen::MatrixXd R = Eigen::MatrixXd::Identity(nu, nu) * std::max(r_steer_, 1.0);
 
-    const auto [Phi, Gamma] = buildPredictionMatrices(A, B, Np, Nc);
-    
     Eigen::MatrixXd Qbar = Eigen::MatrixXd::Zero(nx * Np, nx * Np);
     for (int i = 0; i < Np; ++i) Qbar.block(i * nx, i * nx, nx, nx) = Q;
+    
     Eigen::MatrixXd Rbar = Eigen::MatrixXd::Zero(nu * Nc, nu * Nc);
     for (int i = 0; i < Nc; ++i) Rbar.block(i * nu, i * nu, nu, nu) = R;
-    
+
+    // FF (Curvature)
+    Eigen::VectorXd delta_ff_vec = Eigen::VectorXd::Zero(Np);
+    for (int i = 0; i < Np; ++i) {
+      const double required_dist_k = v_lin * Ts * i;
+      size_t rel_idx_k = 0;
+      while (rel_idx_k + 1 < cum_dist.size() && cum_dist[rel_idx_k] < required_dist_k) {
+        ++rel_idx_k;
+      }
+      const size_t idx_k = std::min(start_idx + rel_idx_k, path_size - 1);
+      const double k_i = computeCurvature(latest_path_, idx_k, curvature_lookahead_dist_);
+      delta_ff_vec(i) = ff_gain_ * std::atan(k_i * wheelbase_);
+    }
+
     const Eigen::VectorXd X_stack_nom = Phi * xk;
     Eigen::MatrixXd H = Gamma.transpose() * Qbar * Gamma + Rbar;
     H = 0.5 * (H + H.transpose());
-    H += 1e-8 * Eigen::MatrixXd::Identity(nu*Nc, nu*Nc);
+    H += 1e-8 * Eigen::MatrixXd::Identity(H.rows(), H.cols());
     
     const Eigen::VectorXd f = Gamma.transpose() * Qbar * (X_stack_nom - ref_stack);
 
     // 6. Constraints
     const int nv = nu * Nc;
-    double u_max = dmax_deg_ * M_PI / 180.0;
+    // dmax_deg_ controls the RATE (e.g. 1 deg per step = 20 deg/s)
+    double u_max = dmax_deg_ * M_PI / 180.0; 
+    
     Eigen::VectorXd lb = Eigen::VectorXd::Constant(nv, -u_max);
     Eigen::VectorXd ub = Eigen::VectorXd::Constant(nv, u_max);
-    
+
+    // Constraints Matrix Construction
+    // 1. Step constraints (Rate limits): -u_max <= u <= u_max
+    // 2. Absolute constraints (Steer limits): -limit <= delta_base + sum(u) <= limit
     const int num_step_constraints = 2 * nv;
     const int num_abs_constraints = 2 * Nc;
     const int total_constraints = num_step_constraints + num_abs_constraints;
-
     Eigen::MatrixXd CI_eig = Eigen::MatrixXd::Zero(nv, total_constraints);
     Eigen::VectorXd ci0_eig = Eigen::VectorXd::Zero(total_constraints);
 
-    // Rate limits
-    for(int i=0; i<nv; ++i) {
-        CI_eig(i, i) = 1.0;            ci0_eig(i) = -lb(i);
-        CI_eig(i, nv+i) = -1.0;        ci0_eig(nv+i) = ub(i);
+    // Rate Constraints
+    for (int i = 0; i < nv; ++i) {
+      CI_eig(i, i) = 1.0;            
+      ci0_eig(i) = -lb(i);
+      CI_eig(i, nv + i) = -1.0;      
+      ci0_eig(nv + i) = ub(i);
     }
-    // Absolute limits
-    for(int k=0; k<Nc; ++k) {
-        for(int j=0; j<=k; ++j) {
-            CI_eig(j, num_step_constraints+k) = 1.0;
-            CI_eig(j, num_step_constraints+Nc+k) = -1.0;
-        }
-        ci0_eig(num_step_constraints+k) = steer_limit_ + delta_curr;
-        ci0_eig(num_step_constraints+Nc+k) = steer_limit_ - delta_curr;
+    // Absolute Constraints (Accumulated u)
+    for (int k = 0; k < Nc; ++k) {
+      for (int j = 0; j <= k; ++j) {
+        CI_eig(j, num_step_constraints + k) = 1.0;            
+        CI_eig(j, num_step_constraints + Nc + k) = -1.0;      
+      }
+      ci0_eig(num_step_constraints + k) = steer_limit_ + delta_base; // Lower bound logic for QP
+      ci0_eig(num_step_constraints + Nc + k) = steer_limit_ - delta_base;
     }
 
     // 7. Solve QP
     qp::Matrix<double> qpG = toQPMatrix(H);
     qp::Vector<double> qpg0 = toQPVector(f);
+    qp::Matrix<double> qpCE(nv, 0);
+    qp::Vector<double> qpce0(0);
     qp::Matrix<double> qpCI = toQPMatrix(CI_eig);
     qp::Vector<double> qpci0 = toQPVector(ci0_eig);
-    qp::Matrix<double> qpCE(nv, 0); 
-    qp::Vector<double> qpce0(0);
     qp::Vector<double> qp_result(nv);
 
     const auto t_qp_start = std::chrono::steady_clock::now();
-    double qp_status = qp::solve_quadprog(qpG, qpg0, qpCE, qpce0, qpCI, qpci0, qp_result);
+    const double qp_status = qp::solve_quadprog(qpG, qpg0, qpCE, qpce0, qpCI, qpci0, qp_result);
     const double qp_ms = std::chrono::duration<double, std::milli>(
       std::chrono::steady_clock::now() - t_qp_start).count();
     
@@ -424,61 +464,56 @@ private:
       std_msgs::msg::Float64 msg; msg.data = qp_ms; qp_time_pub_->publish(msg);
     }
 
-    // 8. Output Calculation
-    double delta_cmd = delta_curr;
+    // 8. Command Calculation
+    double delta_cmd = delta_prev_; 
+    double delta_inc = 0.0;
+    double current_ff_val = delta_ff_vec(0); 
 
     if (std::isfinite(qp_status)) {
-        delta_cmd = delta_curr + qp_result[0];
+      delta_inc = qp_result[0]; // Optimal Change
+      
+      // Final Output = Current State + Optimal Change + FeedForward
+      delta_cmd = delta_base + delta_inc + current_ff_val;
     } else {
-        RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 2000, "QP Failed");
+      RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 2000, "QP Failed");
     }
 
-    delta_cmd = std::clamp(delta_cmd, -steer_limit_, steer_limit_);
-    delta_prev_ = delta_cmd;
+    const double delta_limit = std::abs(steer_limit_);
+    delta_cmd = std::clamp(delta_cmd, -delta_limit, delta_limit);
+    
+    // Update previous state for next loop sync
+    delta_prev_ = delta_cmd; 
 
-    // 9. Visualization & Publish
-    // [CRITICAL FIX 3] Visualization using Target Speed (Shows path even when stopped)
+    // 9. Visualization
     if (pred_path_pub_->get_subscription_count() > 0 && std::isfinite(qp_status)) {
       Eigen::VectorXd u_stack = Eigen::VectorXd::Zero(nu * Nc);
       for (int i = 0; i < nv; ++i) u_stack(i) = qp_result[i];
       
+      // Reconstruct state trajectory from augmented model
+      const Eigen::VectorXd x_pred_stack = X_stack_nom + Gamma * u_stack;
+
       nav_msgs::msg::Path pred_path;
       pred_path.header.stamp = now();
       pred_path.header.frame_id = path_frame_;
-
-      double x_viz = pose.position.x;
-      double y_viz = pose.position.y;
-      double psi_viz = heading;
-      double delta_viz = delta_curr;
-      // Force viz speed to target_speed_ so the Green Line is always visible
-      const double v_viz = target_speed_; 
-
+      
       for (int i = 0; i < Np; ++i) {
-        if (i < Nc) delta_viz += u_stack(i);
-        delta_viz = std::clamp(delta_viz, -steer_limit_, steer_limit_);
-
-        x_viz += v_viz * std::cos(psi_viz) * Ts;
-        y_viz += v_viz * std::sin(psi_viz) * Ts;
-        psi_viz += (v_viz / wheelbase_) * std::tan(delta_viz) * Ts;
-
         geometry_msgs::msg::PoseStamped p;
         p.header = pred_path.header;
-        p.pose.position.x = x_viz;
-        p.pose.position.y = y_viz;
+        // x_pred_stack has structure: [x0, y0, psi0, v0, d0, x1, y1, ...]
+        const auto x_seg = x_pred_stack.segment(nx * i, nx);
+        p.pose.position.x = x_seg(0);
+        p.pose.position.y = x_seg(1);
         tf2::Quaternion q;
-        q.setRPY(0, 0, psi_viz);
+        q.setRPY(0, 0, x_seg(2));
         p.pose.orientation = tf2::toMsg(q);
         pred_path.poses.push_back(p);
       }
       pred_path_pub_->publish(pred_path);
-    }
 
-    // Debug Markers (Existing logic maintained)
-    if(debug_marker_pub_->get_subscription_count() > 0) {
+      // Debug Markers
       visualization_msgs::msg::MarkerArray markers;
       visualization_msgs::msg::Marker text;
-      text.header.frame_id = path_frame_;
-      text.header.stamp = now();
+      text.header = pred_path.header;
       text.ns = "mpc_info";
       text.id = 1;
       text.type = visualization_msgs::msg::Marker::TEXT_VIEW_FACING;
@@ -489,7 +524,7 @@ private:
       text.color.a = 1.0; text.color.r = 1.0; text.color.g = 1.0; text.color.b = 1.0;
       std::ostringstream ss;
       ss.setf(std::ios::fixed); ss.precision(3);
-      ss << "Cmd: " << delta_cmd << "\nEy: " << e_y << "\nEpsi: " << e_psi;
+      ss << "Cmd: " << delta_cmd << "\nInc: " << delta_inc << "\nErr: " << pos_err;
       text.text = ss.str();
       markers.markers.push_back(text);
       debug_marker_pub_->publish(markers);
@@ -499,12 +534,12 @@ private:
     cmd.header.stamp = now();
     cmd.header.frame_id = path_frame_;
     cmd.drive.steering_angle = delta_cmd;
-    cmd.drive.speed = target_speed_;
+    cmd.drive.speed = std::isfinite(qp_status) ? target_speed_ : 0.0;
     cmd_pub_->publish(cmd);
 
+    // Monitoring
     std_msgs::msg::Float64 yaw_rate_msg; yaw_rate_msg.data = twist.angular.z; yaw_rate_pub_->publish(yaw_rate_msg);
     std_msgs::msg::Float64 steer_est_msg; steer_est_msg.data = delta_est_; steering_est_pub_->publish(steer_est_msg);
-    std_msgs::msg::Float64 steer_cmd_msg; steer_cmd_msg.data = delta_cmd; steering_cmd_pub_->publish(steer_cmd_msg);
 
     publish_timer_ms(t_cb_start);
   }
